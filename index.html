@@ -73,11 +73,36 @@
   .ledbar .marquee > span{
     display:inline-block;white-space:nowrap;padding:8px 0;
     padding-left:100%;
-    animation:scrollx 32s linear infinite;
+    animation:scrollx 40s linear infinite;   /* 0.8x speed */
     font-variant-numeric:tabular-nums;
   }
   .ledbar .marquee:hover > span{animation-play-state:paused}
   @keyframes scrollx{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+
+  /* ---- NHKニュース見出しティッカー ---- */
+  .newsbar{
+    margin-top:10px;display:flex;align-items:stretch;font-size:12.5px;
+    border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0d1524;
+  }
+  .newsbar .ntag{
+    display:flex;align-items:center;gap:6px;padding:7px 11px;white-space:nowrap;
+    font-weight:800;letter-spacing:.03em;background:#1e293b;color:var(--text-dim);
+  }
+  .newsbar .ntag::before{
+    content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 0 3px rgba(56,189,248,.18);
+  }
+  .newsbar .news-viewport{flex:1;overflow:hidden;position:relative;display:flex;align-items:center}
+  .newsbar .news-track{
+    display:inline-flex;align-items:center;white-space:nowrap;padding:7px 0;
+    animation:news-scroll 90s linear infinite;
+  }
+  .newsbar:hover .news-track,
+  .newsbar.paused .news-track{animation-play-state:paused}
+  .newsbar .news-track a{color:var(--text);text-decoration:none;padding:0 2px}
+  .newsbar .news-track a:hover{color:var(--accent);text-decoration:underline}
+  .newsbar .news-track .sep{color:var(--text-dim);opacity:.5;padding:0 14px}
+  @keyframes news-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
   .board .body{padding:12px 12px 14px}
   .board h2{font-size:13px;margin:0 0 8px;color:var(--text-dim);font-weight:700;letter-spacing:.04em;
@@ -190,8 +215,9 @@
     .listview{height:300px}
   }
   @media (prefers-reduced-motion:reduce){
-    .ledbar .marquee > span{animation-duration:120s}
+    .ledbar .marquee > span{animation-duration:150s}
     .listview:not(.short) .scroller.run{animation-duration:240s}
+    .newsbar .news-track{animation-duration:300s}
   }
 </style>
 </head>
@@ -233,6 +259,11 @@
     </div>
   </div>
 
+  <div class="newsbar" id="newsbar" hidden>
+    <div class="ntag">NHKニュース</div>
+    <div class="news-viewport"><div class="news-track" id="newsTrack"></div></div>
+  </div>
+
   <div class="warnnote">
     ⚠️ このページは非公式です。数値・発表状況は気象庁の公開データを自動取得したものです。
     避難の判断は、<b>気象庁「キキクル」</b>・<b>中野区の避難情報</b>など公式発表と自治体の指示に必ず従ってください。
@@ -264,7 +295,7 @@
   </section>
 
   <footer>
-    <p><b>データ出典：</b>気象庁 防災情報XML（<code>www.jma.go.jp/bosai/warning/data/r8/map.json</code>）／映像：東京都建設局「東京都水防チャンネル」。いずれも各提供元の利用条件に従います。</p>
+    <p><b>データ出典：</b>気象庁 防災情報（<code>www.jma.go.jp/bosai/</code>）／ニュース見出し：NHKニュース RSS（主要・社会）／映像：東京都建設局「東京都水防チャンネル」。いずれも各提供元の利用条件に従います。ニュース見出しは約5分ごとに更新。</p>
     <p>全国の一次細分区域（地域）単位で、気象庁の集約データから各地域の最新発表を採用して抽出。<b>大雨</b>（特別警報・警報・注意報）と<b>洪水</b>（警報・注意報）のみ表示しています。<span id="fetchnote"></span></p>
     <p>約5分ごとに自動更新。気象庁のデータ形式が変わると表示が止まることがあります。その際は公式ページをご確認ください。</p>
     <p>非公式の個人作成ページ / GitHub Pages でホスティング。</p>
@@ -624,11 +655,79 @@ document.getElementById("filters").addEventListener("click", function(e){
   lv.addEventListener("mouseleave", function(){ lv.classList.remove("paused"); });
 })();
 
-document.getElementById("refreshBtn").addEventListener("click", load);
+document.getElementById("refreshBtn").addEventListener("click", function(){ load(); loadNews(); });
+
+/* ============================================================
+   3) NHKニュース 見出しティッカー（RSS / CORS許可済み）
+   ============================================================ */
+var NEWS_FEEDS = [
+  "https://www3.nhk.or.jp/rss/news/cat0.xml", // 主要
+  "https://www3.nhk.or.jp/rss/news/cat1.xml"  // 社会
+];
+function esc(s){
+  return String(s).replace(/[&<>"]/g, function(c){
+    return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c];
+  });
+}
+function loadNews(){
+  Promise.all(NEWS_FEEDS.map(function(u){
+    var ctrl = new AbortController();
+    var to = setTimeout(function(){ ctrl.abort(); }, 12000);
+    return fetch(u, { signal: ctrl.signal, cache: "no-store" })
+      .then(function(r){ clearTimeout(to); return r.ok ? r.text() : ""; })
+      .catch(function(){ clearTimeout(to); return ""; });
+  })).then(function(texts){
+    var items = [];
+    texts.forEach(function(t){
+      if (!t) return;
+      var doc;
+      try { doc = new DOMParser().parseFromString(t, "application/xml"); } catch(e){ return; }
+      if (doc.querySelector("parsererror")) return;
+      [].forEach.call(doc.getElementsByTagName("item"), function(it){
+        function pick(tag){ var el = it.getElementsByTagName(tag)[0]; return el ? el.textContent.trim() : ""; }
+        var title = pick("title");
+        var link  = pick("link").replace(/^http:\/\//, "https://");
+        var pub   = pick("pubDate");
+        if (title) items.push({ title: title, link: link, t: pub ? Date.parse(pub) || 0 : 0 });
+      });
+    });
+
+    var seen = {}, uniq = [];
+    items.sort(function(a, b){ return b.t - a.t; });
+    items.forEach(function(x){
+      var k = x.link || x.title;
+      if (!seen[k]){ seen[k] = 1; uniq.push(x); }
+    });
+    uniq = uniq.slice(0, 20);
+
+    var bar = document.getElementById("newsbar");
+    var track = document.getElementById("newsTrack");
+    if (!uniq.length){
+      if (!track.innerHTML) bar.hidden = true;   // 既存表示があれば維持
+      return;
+    }
+    var seg = uniq.map(function(x){
+      var a = x.link
+        ? '<a href="' + esc(x.link) + '" target="_blank" rel="noopener">' + esc(x.title) + '</a>'
+        : '<span>' + esc(x.title) + '</span>';
+      return a;
+    }).join('<span class="sep">◆</span>');
+    track.innerHTML = seg + '<span class="sep">◆</span>' + seg; // シームレスループ用に2連結
+    track.style.animationDuration = Math.max(60, uniq.length * 7) + "s";
+    bar.hidden = false;
+  });
+}
+
+// ニュースバーの一時停止（タッチ）
+(function(){
+  var bar = document.getElementById("newsbar");
+  bar.addEventListener("pointerdown", function(){ bar.classList.add("paused"); });
+  window.addEventListener("pointerup", function(){ bar.classList.remove("paused"); });
+})();
 
 // 初回 + 5分ごと自動更新（非表示タブでは待機）
 var lastLoad = 0;
-function loadTracked(){ lastLoad = Date.now(); load(); }
+function loadTracked(){ lastLoad = Date.now(); load(); loadNews(); }
 loadTracked();
 setInterval(function(){
   if (document.visibilityState === "visible") loadTracked();

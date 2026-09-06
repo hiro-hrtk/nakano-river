@@ -74,4 +74,5 @@ https://<あなたのユーザー名>.github.io/nakano-river/
 - 気象庁 防災情報（気象警報・注意報） <https://www.jma.go.jp/bosai/warning/>
 - 東京都 水防災総合情報システム <https://www.kasen-suibo.metro.tokyo.lg.jp/>
 - 東京都水防チャンネル（YouTube） <https://www.youtube.com/@TokyoSuibou>
+- NHKニュース RSS（主要 cat0 / 社会 cat1） <https://www.nhk.or.jp/toppage/rss/index.html>
 - 中野区 河川カメラ・気象情報 <https://www.city.tokyo-nakano.lg.jp/bosai/suigai-sonae/uryo/nakanokukasen.html>
